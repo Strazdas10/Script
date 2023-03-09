@@ -1,0 +1,146 @@
+//@version=4
+strategy(title="Custom Channel with Take Profit and Stop Loss", overlay=true)
+
+// Start date input
+startdate = input(title="Start Date", type=input.time, defval=timestamp("2021-01-01T00:00:00Z"))
+
+// Other inputs
+// Define variables
+angle_long = input(title="Long Angle", type=input.float, defval=1.0)
+length_long = input(title="Long Length", type=input.integer, defval=1)
+angle_short = input(title="Short Angle", type=input.float, defval=1.0)
+length_short = input(title="Short Length", type=input.integer, defval=1)
+mult = input(title="Multiplier", type=input.float, defval=2.0)
+dev_long = mult * stdev(close, length_long)
+dev_short = mult * stdev(close, length_short)
+upper_long = highest(high, length_long) + dev_long
+lower_long = lowest(low, length_long) - dev_long
+upper_short = highest(high, length_short) + dev_short
+lower_short = lowest(low, length_short) - dev_short
+pi_val = 3.14159265359 // Define pi
+
+// Take Profit and Stop Loss inputs
+takeProfitPct = input(title="Take Profit Percentage", type=input.float, defval=1.0, minval=0.1, step=0.1)
+stopLossPct = input(title="Stop Loss Percentage", type=input.float, defval=1.0, minval=0.1, step=0.1)
+
+// Define functions
+getAngle(p1, p2, isLong) =>
+    if isLong
+        atan((p2-p1)/length_long) * (180 / pi_val)
+    else
+        atan((p2-p1)/length_short) * (180 / pi_val)
+
+getUpper(angle_degrees, middle_val, isLong) =>
+    if isLong
+        middle_val + (tan(angle_degrees * pi_val / 180) * length_long)
+    else
+        middle_val + (tan(angle_degrees * pi_val / 180) * length_short)
+
+getLower(angle_degrees, middle_val, isLong) =>
+    if isLong
+        middle_val - (tan(angle_degrees * pi_val / 180) * length_long)
+    else
+        middle_val - (tan(angle_degrees * pi_val / 180) * length_short)
+
+// Calculate channel values
+middle_long = (upper_long + lower_long) / 2
+upper_long := getUpper(angle_long, middle_long, true)
+lower_long := getLower(angle_long, middle_long, true)
+
+middle_short = (upper_short + lower_short) / 2
+upper_short := getUpper(angle_short, middle_short, false)
+lower_short := getLower(angle_short, middle_short, false)
+
+// Plot channel
+plot(middle_long, color=color.white)
+plot(upper_long, color=color.green)
+plot(lower_long, color=color.red)
+plot(middle_short, color=color.white)
+plot(upper_short, color=color.green)
+plot(lower_short, color=color.red)
+
+// Define signals
+buySignalLong = crossover(close, upper_long)
+sellSignalLong = crossunder(close, lower_long)
+buySignalShort = crossover(close, upper_short)
+sellSignalShort = crossunder(close, lower_short)
+
+// Define trade options
+var tradeType = input(title="Trade Type", options=["Long", "Short", "Both"], defval="Both")
+var longTP = 0.0
+var longSL = 0.0
+var shortTP = 0.0
+var shortSL = 0.0
+
+// Enter long position when buy signal is true
+if (tradeType == "Long" or tradeType == "Both") and buySignalLong
+    strategy.entry("Long", strategy.long, comment="Long Entry")
+    longTP := strategy.position_avg_price * (1 + takeProfitPct/100)
+    longSL := strategy.position_avg_price * (1 - stopLossPct/100)
+
+// Exit long position when sell signal is true or take profit or stop loss is reached
+if strategy.position_size > 0
+    longExit = sellSignalLong or (close >= longTP) or (close <= longSL)
+    strategy.exit("Long TP/SL", "Long", limit=longTP, stop=longSL, when=longExit, comment="Long Exit")
+
+// Enter short position when buy signal is true
+if (tradeType == "Short" or tradeType == "Both") and buySignalShort
+    strategy.entry("Short", strategy.short, comment="Short Entry")
+    shortTP := strategy.position_avg_price * (1 - takeProfitPct/100)
+    shortSL := strategy.position_avg_price * (1 + stopLossPct/100)
+
+// Exit short position when sell signal is true or take profit or stop loss is reached
+if strategy.position_size < 0
+    shortExit = sellSignalShort or (close <= shortTP) or (close >= shortSL)
+    strategy.exit("Short TP/SL", "Short", limit=shortTP, stop=shortSL, when=shortExit, comment="Short Exit")
+
+// Define boolean variables for alerts
+var longAlert = false
+var shortAlert = false
+
+// Create long entry alert
+if (buySignalLong)
+    if (not longAlert)
+        longAlert := true
+        alertcondition(condition=buySignalLong, title="Buy Signal - Long Entry", message="Buy Signal - Long Entry")
+
+// Create long exit alerts
+if (strategy.position_size > 0)
+    if (sellSignalLong)
+        if (longAlert)
+            longAlert := false
+            alertcondition(condition=sellSignalLong, title="Sell Signal - Long Exit", message="Sell Signal - Long Exit")
+
+    if (close >= longTP)
+        if (longAlert)
+            longAlert := false
+            alertcondition(condition=close >= longTP, title="Take Profit - Long Exit", message="Take Profit - Long Exit")
+
+    if (close <= longSL)
+        if (longAlert)
+            longAlert := false
+            alertcondition(condition=close <= longSL, title="Stop Loss - Long Exit", message="Stop Loss - Long Exit")
+
+// Create short entry alert
+if (buySignalShort)
+    if (not shortAlert)
+        shortAlert := true
+        alertcondition(condition=buySignalShort, title="Buy Signal - Short Entry", message="Buy Signal - Short Entry")
+
+// Create short exit alerts
+if (strategy.position_size < 0)
+    if (sellSignalShort)
+        if (shortAlert)
+            shortAlert := false
+            alertcondition(condition=sellSignalShort, title="Sell Signal - Short Exit", message="Sell Signal - Short Exit")
+
+    if (close <= shortTP)
+        if (shortAlert)
+            shortAlert := false
+            alertcondition(condition=close <= shortTP, title="Take Profit - Short Exit", message="Take Profit - Short Exit")
+
+    if (close >= shortSL)
+        if (shortAlert)
+            shortAlert := false
+            alertcondition(condition=close >= shortSL, title="Stop Loss - Short Exit", message="Stop Loss - Short Exit")
+
